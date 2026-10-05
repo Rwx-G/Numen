@@ -1,0 +1,58 @@
+# cargo-deny policy: license, advisory, source, and ban checks over the full
+# dependency tree. Run with `cargo deny check`. See the cargo-deny book.
+
+[graph]
+all-features = true
+# Check only the target we build and ship (the Linux container). Prunes
+# Windows/UEFI/wasm/macOS-only crates and their licenses (e.g. the LGPL r-efi,
+# pulled only on UEFI targets) from consideration.
+targets = ["x86_64-unknown-linux-gnu"]
+
+[advisories]
+version = 2
+yanked = "deny"
+# Deep transitive crates we do not control may be flagged unmaintained (e.g.
+# paste, number_prefix); only fail when a direct dependency is unmaintained.
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses present in the tree (including the mistral.rs / candle
+# deps). MPL-2.0 is weak file-level copyleft, acceptable for dependencies. A new
+# or strong-copyleft license entering later fails by design; add it deliberately.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "BSL-1.0",
+    "ISC",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow = []
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# mistralrs stopped publishing to crates.io at 0.8.1; pinned to a git tag in
+# Cargo.toml to keep receiving security and bug fixes. mistralrs in turn
+# pins candle to a git rev, so that repo is allowed too.
+allow-git = [
+    "https://github.com/EricLBuehler/mistral.rs",
+    "https://github.com/huggingface/candle",
+]

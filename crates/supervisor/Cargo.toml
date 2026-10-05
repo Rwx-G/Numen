@@ -1,0 +1,11 @@
+[package]
+name = "numen-supervisor"
+version = "0.1.0"
+edition = "2021"
+description = "Numen's lifecycle supervisor: spawns the kernel, hot-swaps it on a deploy with health-check and rollback, and owns the kill switch. Std-only and separately built so a buggy or adversarial kernel cannot disable its own safety controls."
+license = "Apache-2.0"
+
+# Deliberately no dependencies: the supervisor links no third-party code, so it
+# does not inherit the kernel's dependency closure (candle, mistralrs, axum, ...)
+# and its trust surface stays minimal.
+[dependencies]

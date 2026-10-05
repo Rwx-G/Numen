@@ -1,0 +1,10 @@
+/target
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+/data
+_junk/
+.claude/settings.local.json

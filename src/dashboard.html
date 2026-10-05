@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<!--
+  Numen observability dashboard. A single self-contained page (no external assets,
+  no build step) served at GET /. It polls the read-only endpoints to show, live,
+  what Numen knows, what it wants to explore, what it is doing, and lets you probe
+  its causal reasoning. The data endpoints carry the bearer token when one is set.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Numen</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #c9d1d9;
+    --muted: #8b949e; --accent: #58a6ff; --good: #3fb950; --warn: #d29922;
+    --bad: #f85149; --pin: #bc8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; padding: 12px 20px;
+    border-bottom: 1px solid var(--border); position: sticky; top: 0;
+    background: var(--bg); z-index: 5;
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: 2px; }
+  header h1 .sub { color: var(--muted); font-weight: normal; font-size: 12px; letter-spacing: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.ok { background: var(--good); } .dot.err { background: var(--bad); }
+  .spacer { flex: 1; }
+  header input {
+    background: var(--panel); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 5px 8px; font: inherit; width: 220px;
+  }
+  #updated { color: var(--muted); font-size: 12px; }
+  main { padding: 18px; display: grid; gap: 16px; max-width: 1400px; margin: 0 auto; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .panel h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .vitals { display: flex; flex-wrap: wrap; gap: 24px; }
+  .vital .n { font-size: 26px; font-weight: 600; }
+  .vital .l { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .bar { height: 6px; border-radius: 3px; background: #21262d; overflow: hidden; margin-top: 4px; }
+  .bar > span { display: block; height: 100%; background: var(--accent); }
+  .row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+  .row .k { color: var(--muted); } .row .v { text-align: right; }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; border: 1px solid var(--border); }
+  .pin { color: var(--pin); border-color: var(--pin); }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { padding: 5px 0; border-bottom: 1px solid #21262d; }
+  li:last-child { border-bottom: 0; }
+  .feed li { display: flex; gap: 10px; align-items: baseline; }
+  .feed .kind { width: 84px; flex: none; }
+  .feed time { color: var(--muted); width: 64px; flex: none; text-align: right; font-size: 12px; }
+  .kind-infer { color: var(--accent); } .kind-explore { color: var(--good); }
+  .kind-ingest { color: var(--warn); } .kind-consolidate { color: var(--muted); }
+  .kind-improve { color: var(--pin); }
+  .explorer { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .explorer input { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 9px; font: inherit; flex: 1; min-width: 120px; }
+  button { background: var(--accent); color: #0d1117; border: 0; border-radius: 6px; padding: 7px 13px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: default; }
+  .path { line-height: 2; }
+  .path .node { background: #21262d; border-radius: 5px; padding: 1px 7px; }
+  .path .edge { color: var(--muted); }
+  .verdict { margin-top: 8px; padding: 8px 10px; background: #21262d; border-radius: 6px; }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); text-decoration: none; }
+  .links { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); }
+  pre { white-space: pre-wrap; margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NUMEN <span class="sub">causal reasoning agent</span></h1>
+  <span id="dot" class="dot" title="connection"></span>
+  <span id="updated"></span>
+  <span class="spacer"></span>
+  <input id="token" placeholder="API token (if set)" autocomplete="off">
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Vitals</h2>
+    <div class="vitals" id="vitals"><span class="muted">connecting...</span></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Attention &mdash; what it wants next (Active Inference)</h2>
+      <div id="attend"><span class="muted">...</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>Activity &mdash; what it is doing</h2>
+      <ul class="feed" id="feed"><li class="muted">no activity yet</li></ul>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Mind &mdash; what it is focused on, and what it knows about it</h2>
+    <div class="explorer">
+      <input id="mind-concept" placeholder="introspect any concept (empty = follow the current target)">
+      <button id="mind-go" class="ghost">Look inside</button>
+    </div>
+    <div id="mind"><span class="muted">...</span></div>
+  </section>
+
+  <section class="panel">
+    <h2>Reasoning &mdash; probe the causal graph</h2>
+    <div class="explorer">
+      <input id="cause" placeholder="cause (e.g. rain)">
+      <input id="effect" placeholder="effect (e.g. wet ground)">
+      <button id="ask-query">Causal query</button>
+      <button id="ask-explain" class="ghost">Explain path</button>
+    </div>
+    <div class="explorer">
+      <input id="ask" placeholder="ask Numen a causal question (delegates to the LLM and learns)">
+      <button id="ask-infer" class="ghost">Ask &amp; learn</button>
+    </div>
+    <div id="reasoning"><span class="muted">structural queries read the graph (free); "Ask &amp; learn" delegates and grows it.</span></div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Identity &mdash; the pinned self</h2>
+      <div id="identity"><span class="muted">...</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>Most connected concepts</h2>
+      <ul id="concepts"><li class="muted">...</li></ul>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="links">
+      <span>Open (carries your token):</span>
+      <a href="#" onclick="openWithToken('/stats');return false">/stats</a>
+      <a href="#" onclick="openWithToken('/attend');return false">/attend</a>
+      <a href="#" onclick="openWithToken('/events');return false">/events</a>
+      <a href="#" onclick="openWithToken('/identity');return false">/identity</a>
+      <a href="#" onclick="openWithToken('/graph.dot');return false">/graph.dot</a>
+      <a href="#" onclick="openWithToken('/graph.md');return false">/graph.md</a>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const tokenBox = $("token");
+tokenBox.value = localStorage.getItem("numen_token") || "";
+tokenBox.addEventListener("change", () => { localStorage.setItem("numen_token", tokenBox.value.trim()); poll(); });
+
+function headers(json) {
+  const h = {};
+  if (json) h["content-type"] = "application/json";
+  const t = tokenBox.value.trim();
+  if (t) h["authorization"] = "Bearer " + t;
+  return h;
+}
+async function api(path, body) {
+  const opt = body ? { method: "POST", headers: headers(true), body: JSON.stringify(body) }
+                    : { headers: headers(false) };
+  const r = await fetch(path, opt);
+  if (!r.ok) throw new Error(path + " -> " + r.status);
+  return r.json();
+}
+
+// Open a raw endpoint in a new tab WITH the bearer token (a plain link would not
+// carry it and get 401). Fetch with the token, then open the result as a blob.
+async function openWithToken(path) {
+  try {
+    const r = await fetch(path, { headers: headers(false) });
+    if (!r.ok) throw new Error(path + " -> " + r.status);
+    const url = URL.createObjectURL(await r.blob());
+    window.open(url, "_blank");
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) { alert(e.message); }
+}
+
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function pct(x) { return (100 * (x || 0)).toFixed(0) + "%"; }
+function ago(ts) {
+  const s = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (s < 60) return s + "s"; if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h"; return Math.floor(s / 86400) + "d";
+}
+function setConn(ok) {
+  $("dot").className = "dot " + (ok ? "ok" : "err");
+  $("updated").textContent = ok ? "updated " + new Date().toLocaleTimeString() : "disconnected";
+}
+
+function renderVitals(s) {
+  const m = s.metrics || {};
+  const vital = (n, l) => `<div class="vital"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  $("vitals").innerHTML =
+    vital(s.nodes, "concepts") + vital(s.edges, "relations") + vital(s.episodes, "episodes") +
+    vital(pct(m.delegation_ratio), "delegated") +
+    vital((m.avg_investigate_ms || 0).toFixed(0) + "ms", "avg latency") +
+    vital(pct(m.grounding_ratio), "grounding") +
+    vital(m.consolidations || 0, "consolidations");
+}
+function renderAttend(a) {
+  const act = a.action || {};
+  const label = act.kind === "explore" ? `explore <b>${esc(act.concept)}</b>` : "idle";
+  let h = `<div class="row"><span class="k">selected action</span><span class="v">${label} <span class="chip">autonomy ${a.action_autonomy}</span></span></div>`;
+  h += `<div class="row"><span class="k">explore / exploit</span><span class="v">${pct(a.exploration_bias)} exploration</span></div>`;
+  h += `<div class="bar"><span style="width:${pct(a.exploration_bias)}"></span></div>`;
+  h += `<h2 style="margin-top:14px">top knowledge gaps</h2><ul>`;
+  for (const f of (a.foci || []).slice(0, 8)) {
+    h += `<li><div class="row"><span>${esc(f.concept)}</span><span class="v muted">salience ${f.salience.toFixed(2)} &middot; gap ${pct(f.epistemic)}</span></div>
+          <div class="bar"><span style="width:${pct(f.salience)}"></span></div></li>`;
+  }
+  h += "</ul>";
+  $("attend").innerHTML = h;
+}
+function renderFeed(events) {
+  if (!events.length) { $("feed").innerHTML = '<li class="muted">no activity yet</li>'; return; }
+  $("feed").innerHTML = events.slice(0, 40).map(e =>
+    `<li><span class="kind kind-${esc(e.kind)}">${esc(e.kind)}</span>
+         <span>${esc(e.detail)}</span><span class="spacer"></span><time>${ago(e.ts)}</time></li>`
+  ).join("");
+}
+function renderIdentity(id) {
+  const vals = (id.concepts || []).map(c =>
+    `<span class="chip pin" title="confidence ${c.confidence.toFixed(2)}">${esc(c.label)}</span>`).join(" ");
+  const corr = (id.relations || []).map(r => `${esc(r.from)} <span class="muted">${esc(r.relation)}</span> ${esc(r.to)}`).join("<br>");
+  $("identity").innerHTML = `<div style="line-height:2.2">${vals}</div>
+    <div style="margin-top:10px" class="muted">${corr}</div>`;
+}
+function renderConcepts(list) {
+  if (!list.length) { $("concepts").innerHTML = '<li class="muted">empty graph</li>'; return; }
+  $("concepts").innerHTML = list.slice(0, 12).map(c =>
+    `<li><div class="row"><span>${esc(c.label)}</span><span class="v muted">degree ${c.degree} &middot; conf ${c.confidence.toFixed(2)}</span></div></li>`
+  ).join("");
+}
+function renderMind(v) {
+  const head = v.known
+    ? `<div class="row"><span class="k" style="font-size:15px">${esc(v.concept)}</span>
+         <span class="v">confidence ${v.confidence.toFixed(2)} &middot; uncertainty ${pct(v.epistemic)} &middot; would <b>${esc(v.route)}</b></span></div>`
+    : `<div class="row"><span class="k" style="font-size:15px">${esc(v.concept)}</span>
+         <span class="v muted">unknown &middot; would <b>${esc(v.route)}</b> to learn it</span></div>`;
+  const causes = v.causes.length
+    ? v.causes.map(s => `<li><span class="node">${esc(s.from)}</span> <span class="edge">&mdash;${esc(s.relation)} (${s.strength.toFixed(2)})&rarr;</span></li>`).join("")
+    : '<li class="muted">nothing learned yet</li>';
+  const effects = v.effects.length
+    ? v.effects.map(s => `<li><span class="edge">&mdash;${esc(s.relation)} (${s.strength.toFixed(2)})&rarr;</span> <span class="node">${esc(s.to)}</span></li>`).join("")
+    : '<li class="muted">nothing learned yet</li>';
+  $("mind").innerHTML = head +
+    `<div class="grid" style="margin-top:10px">
+       <div><div class="muted" style="margin-bottom:4px">what it thinks causes it</div><ul>${causes}</ul></div>
+       <div><div class="muted" style="margin-bottom:4px">what it thinks it causes</div><ul>${effects}</ul></div>
+     </div>`;
+}
+async function introspect(concept) {
+  if (!concept) return;
+  try { renderMind(await api("/introspect?concept=" + encodeURIComponent(concept))); }
+  catch (e) { $("mind").innerHTML = `<span class="muted">error: ${esc(e.message)}</span>`; }
+}
+function renderPath(steps) {
+  if (!steps || !steps.length) return '<span class="muted">no directed causal path</span>';
+  let h = '<div class="path">';
+  steps.forEach((s, i) => {
+    if (i === 0) h += `<span class="node">${esc(s.from)}</span> `;
+    h += `<span class="edge">&mdash;${esc(s.relation)} (${s.strength.toFixed(2)})&rarr;</span> <span class="node">${esc(s.to)}</span> `;
+  });
+  return h + "</div>";
+}
+
+async function poll() {
+  try {
+    const [stats, attend, events, identity] = await Promise.all([
+      api("/stats"), api("/attend"), api("/events"), api("/identity"),
+    ]);
+    renderVitals(stats); renderAttend(attend); renderFeed(events);
+    renderIdentity(identity); renderConcepts(stats.top_concepts || []);
+    // Follow the current target unless the user is introspecting a concept by hand.
+    const target = attend.action && attend.action.concept;
+    if (target && !$("mind-concept").value.trim()) introspect(target);
+    setConn(true);
+  } catch (e) { setConn(false); }
+}
+
+async function runQuery() {
+  const cause = $("cause").value.trim(), effect = $("effect").value.trim();
+  if (!cause || !effect) return;
+  $("reasoning").innerHTML = '<span class="muted">reasoning...</span>';
+  try {
+    const q = await api("/query", { cause, effect });
+    let h = renderPath(q.causal_path);
+    h += `<div class="verdict"><b>${esc(q.verdict)}</b></div>`;
+    if (q.confounders && q.confounders.length)
+      h += `<div style="margin-top:8px" class="muted">confounders (back-door): ${q.confounders.map(esc).join(", ")}</div>`;
+    $("reasoning").innerHTML = h;
+  } catch (e) { $("reasoning").innerHTML = `<span class="muted">error: ${esc(e.message)}</span>`; }
+}
+async function runExplain() {
+  const from = $("cause").value.trim(), to = $("effect").value.trim();
+  if (!from || !to) return;
+  $("reasoning").innerHTML = '<span class="muted">tracing...</span>';
+  try {
+    const r = await api("/explain", { from, to });
+    $("reasoning").innerHTML = renderPath(r.path || r.steps || r);
+  } catch (e) { $("reasoning").innerHTML = `<span class="muted">error: ${esc(e.message)}</span>`; }
+}
+async function runInfer() {
+  const query = $("ask").value.trim();
+  if (!query) return;
+  $("reasoning").innerHTML = '<span class="muted">delegating &amp; reasoning (may take a while)...</span>';
+  try {
+    const r = await api("/infer", { query });
+    const rels = (r.relations || []).map(rel =>
+      `<li><span class="node">${esc(rel.cause)}</span> <span class="edge">&mdash;${esc(rel.kind)} (${rel.strength.toFixed(2)})&rarr;</span> <span class="node">${esc(rel.effect)}</span></li>`).join("");
+    $("reasoning").innerHTML =
+      `<div class="row"><span class="k">via</span><span class="v">${esc(r.source)} &middot; confidence ${(r.confidence||0).toFixed(2)} &middot; learned ${r.learned}</span></div>` +
+      (rels ? `<div class="muted" style="margin:8px 0 2px">what it learned</div><ul class="path">${rels}</ul>` : '<div class="muted" style="margin-top:8px">nothing new learned</div>') +
+      (r.answer ? `<div class="verdict"><pre>${esc(r.answer)}</pre></div>` : '');
+    poll();
+  } catch (e) { $("reasoning").innerHTML = `<span class="muted">error: ${esc(e.message)}</span>`; }
+}
+$("mind-go").onclick = () => introspect($("mind-concept").value.trim());
+$("ask-query").onclick = runQuery;
+$("ask-explain").onclick = runExplain;
+$("ask-infer").onclick = runInfer;
+
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>

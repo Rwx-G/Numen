@@ -1,0 +1,57 @@
+[package]
+name = "numen"
+version = "0.1.0"
+edition = "2021"
+description = "Self-hosted causal-reasoning AI agent. The LLM is the language interface; a Pearl causal graph is the reasoning engine."
+license = "Apache-2.0"
+
+# The supervisor is a separate, std-only workspace member so it does not inherit
+# the kernel's dependency closure and stays a minimal, trusted parent process.
+[workspace]
+members = ["crates/supervisor"]
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+# Embeddings for vector memory: a BERT sentence-transformer run via candle. Pinned
+# to the exact candle git rev mistralrs already uses, so the whole tree shares one
+# candle-core (a crates.io candle would be a second, conflicting copy). The rev
+# must be the full SHA string mistralrs writes: cargo keys a git source by the
+# literal rev, so a short form of the same commit is a second candle-core. The
+# allow-git exception for this source is in deny.toml.
+candle-core = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c", version = "0.11.0" }
+candle-nn = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c", version = "0.11.0" }
+candle-transformers = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c", version = "0.11.0" }
+# RSS and Atom feed parser for the World Ingestion Layer.
+feed-rs = "2"
+# Pinned to a git tag: the author stopped publishing to crates.io at 0.8.1, so
+# the registry version is a dead end for security and bug fixes. Re-pin the tag
+# deliberately on update (allow-git exception is in deny.toml).
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs", tag = "v0.9.4", version = "0.9.4" }
+petgraph = "0.8"
+# Telegram Bot API client (effector). Already in the tree via the ML stack, so the
+# major version follows mistralrs. rustls only, no native-tls; since 0.13 it
+# verifies against the platform trust store, so the image needs ca-certificates.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Tokenizer for the embedding model. Kept on the major version candle-core uses,
+# since embedding runs on the candle path (mistralrs pins an older one of its own).
+tokenizers = "0.23"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.7", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+# HTTP integration tests of the axum router (ServiceExt::oneshot). Already in the
+# tree via axum.
+tower = { version = "0.5", features = ["util"] }
+
+[features]
+# NVIDIA CUDA GPU inference via mistral.rs (opt-in). The default build is CPU.
+cuda = ["mistralrs/cuda"]
+
+[profile.release]
+strip = true

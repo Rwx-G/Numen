@@ -1,0 +1,68 @@
+# Numen - everyday GPU deployment. Runs the single image as the plain kernel:
+# self-improvement is dormant (no supervisor, NUMEN_SRC_DIR unset, read-only root).
+# To let it rewrite and redeploy itself, use docker-compose.selfimprove.yml, which
+# runs the SAME image under the supervisor.
+services:
+  numen:
+    build:
+      context: .
+    image: numen:0.1.0
+    container_name: numen
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NUMEN_DB_PATH: /data/numen.db
+      NUMEN_BIND: 0.0.0.0:8080
+      NUMEN_CONSOLIDATE_TICK_SECS: ${NUMEN_CONSOLIDATE_TICK_SECS:-300}
+      NUMEN_IDLE_SECS: ${NUMEN_IDLE_SECS:-60}
+      # 1/true lets the agent explore its biggest knowledge gap on its own while
+      # idle (Active Inference). Off by default: it delegates to the LLM on a timer.
+      NUMEN_PROACTIVE: ${NUMEN_PROACTIVE:-0}
+      # Space- or comma-separated RSS/Atom feed URLs the scheduler fetches on each
+      # idle tick (dedup'd by entry id). Empty disables scheduled ingestion.
+      NUMEN_FEEDS: ${NUMEN_FEEDS:-}
+      NUMEN_MODEL_PATH: ${NUMEN_MODEL_PATH:-/models/Qwen3-30B-A3B-Q4_K_M.gguf}
+      # Embedding model dir (vector memory) under the same /models mount. Unset or
+      # absent -> the graph is recalled by exact labels only.
+      NUMEN_EMBED_MODEL_DIR: ${NUMEN_EMBED_MODEL_DIR:-/models/all-MiniLM-L6-v2}
+      # HOME under the world-writable /tmp tmpfs (read-only root, see below), so the
+      # claude CLI ($HOME/.claude) and the mistral.rs HF cache ($HOME/.cache) work.
+      HOME: /tmp/numen
+      # Serve the dashboard from the mounted file below, so UI tweaks need only a
+      # restart, not an image rebuild.
+      NUMEN_DASHBOARD: /app/dashboard.html
+    volumes:
+      - numen-data:/data
+      # Host dir holding the GGUF, set NUMEN_MODELS_DIR in .env. Unset -> empty
+      # mount -> Numen falls back to Claude only.
+      - "${NUMEN_MODELS_DIR:-/tmp/numen-models}:/models:ro"
+      # The dashboard, live-editable: edit src/dashboard.html, `docker compose restart`.
+      - "./src/dashboard.html:/app/dashboard.html:ro"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Immutable root filesystem: the kernel writes only /data and /tmp. The image's
+    # toolchain and source checkout sit read-only and unused in this mode.
+    read_only: true
+    tmpfs:
+      - /tmp
+    pids_limit: 512
+    cpus: "8.0"
+    # The 30B lives in VRAM, but mistral.rs uses substantial host RAM for loading
+    # and buffers; a small cap would OOM-kill the load.
+    mem_limit: 32g
+
+volumes:
+  numen-data:

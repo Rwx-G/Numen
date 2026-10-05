@@ -1,0 +1,15 @@
+.git
+.gitignore
+target
+**/*.db
+**/*.db-wal
+**/*.db-shm
+.env
+.env.*
+!.env.example
+docs
+_bmad
+_bmad-output
+_junk
+.claude
+README.md

@@ -10,7 +10,9 @@ services:
     container_name: numen
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      # Loopback only: the API can spend Claude quota and, with a token, rewrite the
+      # agent. Expose it beyond the host deliberately (reverse proxy + NUMEN_API_TOKEN).
+      - "127.0.0.1:8080:8080"
     env_file:
       - path: .env
         required: false
